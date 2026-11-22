@@ -32,7 +32,9 @@ func do(h http.Handler, method, path, user, body string) *httptest.ResponseRecor
 
 func TestHTTPFlow(t *testing.T) {
 	s, g, d := newTestServer()
-	h := s.Routes()
+	mux := http.NewServeMux()
+	s.Routes(mux, nil)
+	var h http.Handler = mux
 
 	if rec := do(h, "POST", "/v1/buzz", "", `{}`); rec.Code != 401 {
 		t.Fatalf("unauth: %d", rec.Code)
@@ -45,7 +47,7 @@ func TestHTTPFlow(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("send: %d %s", rec.Code, rec.Body)
 	}
-	var ev eventResp
+	var ev EventJSON
 	_ = json.Unmarshal(rec.Body.Bytes(), &ev)
 	if len(d.Sent) != 1 || ev.Status != StatusSent {
 		t.Fatalf("not dispatched: %+v", ev)

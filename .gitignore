@@ -1,0 +1,10 @@
+data/
+*.db
+*.db-wal
+*.db-shm
+data.key
+.gradle/
+build/
+local.properties
+*.apk
+.idea/
