@@ -1,0 +1,164 @@
+openapi: 3.1.0
+info:
+  title: Buzzit Platform API
+  version: 1.0.0-draft
+  description: |
+    Free API for sending messages and buzzes to Buzzit users who have
+    authorized your app. Third-party apps can send `nudge` and `buzz` levels;
+    `emergency` is reserved for people the user personally trusts.
+
+    Free tier: 10,000 messages/day, 500 buzzes/day, 100 req/s burst.
+servers:
+  - url: https://api.buzzit.app/v1
+  - url: https://sandbox.api.buzzit.app/v1
+security:
+  - oauth2: []
+  - botToken: []
+
+paths:
+  /me:
+    get:
+      summary: The authorized user's public profile
+      security: [{ oauth2: [profile:read] }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+
+  /messages:
+    post:
+      summary: Send a message to a user or bot chat your app is authorized for
+      security: [{ oauth2: [messages:send] }, { botToken: [] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, text]
+              properties:
+                to: { type: string, description: User ID or chat ID }
+                text: { type: string, maxLength: 4096 }
+                buttons:
+                  type: array
+                  maxItems: 6
+                  items: { type: object, properties: { label: { type: string }, action: { type: string } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /chats/{chatId}/messages:
+    get:
+      summary: List messages in a bot chat (never user-to-user chats)
+      security: [{ botToken: [] }]
+      parameters:
+        - { name: chatId, in: path, required: true, schema: { type: string } }
+        - { name: before, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 100, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { data: { type: array, items: { $ref: "#/components/schemas/Message" } }, next: { type: string } } }
+
+  /buzz:
+    post:
+      summary: Buzz a user
+      security: [{ oauth2: [buzz:send] }]
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recipient, level]
+              properties:
+                recipient: { type: string }
+                level: { type: string, enum: [nudge, buzz] }
+                note: { type: string, maxLength: 140 }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Buzz" } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: Recipient is in quiet hours, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /buzz/{id}:
+    get:
+      summary: Get buzz delivery status
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Buzz" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+
+webhooks:
+  buzz.acknowledged:
+    post:
+      summary: The user acknowledged a buzz your app sent
+      description: Signed with `Buzzit-Signature: t=<unix>,v1=<hmac-sha256 of "t.body">`.
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/WebhookEvent" } } } }
+      responses: { "2XX": { description: Received } }
+  message.created:
+    post:
+      summary: A user sent a message to your bot
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/WebhookEvent" } } } }
+      responses: { "2XX": { description: Received } }
+  user.revoked:
+    post:
+      summary: A user revoked your app's access
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/WebhookEvent" } } } }
+      responses: { "2XX": { description: Received } }
+
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://buzzit.app/oauth/authorize
+          tokenUrl: https://api.buzzit.app/oauth/token
+          scopes:
+            profile:read: Read public profile
+            messages:send: Send messages to the user
+            buzz:send: Nudge and buzz the user
+    botToken:
+      type: http
+      scheme: bearer
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, maxLength: 64 }
+  responses:
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    RateLimited:
+      description: Rate limited
+      headers: { Retry-After: { schema: { type: integer } } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    User:
+      type: object
+      properties: { id: { type: string }, username: { type: string }, display_name: { type: string }, avatar_url: { type: string, format: uri } }
+    Message:
+      type: object
+      properties: { id: { type: string }, chat_id: { type: string }, from: { type: string }, text: { type: string }, created_at: { type: string, format: date-time } }
+    Buzz:
+      type: object
+      properties:
+        id: { type: string, example: bz_3f9c0a1e2b }
+        recipient: { type: string }
+        level: { type: string, enum: [nudge, buzz, emergency] }
+        status: { type: string, enum: [sent, delivered, rang, acked, expired] }
+        created_at: { type: string, format: date-time }
+    WebhookEvent:
+      type: object
+      properties: { id: { type: string }, type: { type: string }, created_at: { type: string, format: date-time }, data: { type: object } }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties: { code: { type: string }, message: { type: string } }

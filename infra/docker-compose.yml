@@ -1,0 +1,40 @@
+# Local development stack. `docker compose -f infra/docker-compose.yml up`
+services:
+  buzz-svc:
+    build: { context: ../services, args: { SERVICE: buzz-svc } }
+    environment:
+      BUZZ_ADDR: ":8081"
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://buzzit:buzzit@postgres:5432/buzzit?sslmode=disable
+      KAFKA_BROKERS: redpanda:9092
+    ports: ["8081:8081"]
+    depends_on: [redis, postgres, redpanda]
+
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: buzzit, POSTGRES_PASSWORD: buzzit, POSTGRES_DB: buzzit }
+    ports: ["5432:5432"]
+    volumes: [pg:/var/lib/postgresql/data]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    command: [redpanda, start, --mode, dev-container, --smp, "1", --kafka-addr, "PLAINTEXT://0.0.0.0:9092", --advertise-kafka-addr, "PLAINTEXT://redpanda:9092"]
+    ports: ["9092:9092"]
+
+  scylla:
+    image: scylladb/scylla:6.1
+    command: [--smp, "1", --memory, "750M", --developer-mode, "1"]
+    ports: ["9042:9042"]
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    command: server /data --console-address :9001
+    environment: { MINIO_ROOT_USER: buzzit, MINIO_ROOT_PASSWORD: buzzit-dev-only }
+    ports: ["9000:9000", "9001:9001"]
+
+volumes:
+  pg: {}
