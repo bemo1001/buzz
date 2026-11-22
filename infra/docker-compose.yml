@@ -1,40 +1,21 @@
-# Local development stack. `docker compose -f infra/docker-compose.yml up`
+# Run Buzzit locally or on a small server:
+#   docker compose -f infra/docker-compose.yml up -d
+# Data (SQLite database, encryption key, media) lives in the buzzit-data volume.
+# In production put a TLS proxy (Caddy, nginx, a cloud load balancer) in front,
+# or pass --tls-cert/--tls-key.
 services:
-  buzz-svc:
-    build: { context: ../services, args: { SERVICE: buzz-svc } }
+  buzzit:
+    build: { context: ../services }
+    restart: unless-stopped
+    command: ["--addr", ":8080", "--data", "/data"]
     environment:
-      BUZZ_ADDR: ":8081"
-      REDIS_URL: redis://redis:6379
-      DATABASE_URL: postgres://buzzit:buzzit@postgres:5432/buzzit?sslmode=disable
-      KAFKA_BROKERS: redpanda:9092
-    ports: ["8081:8081"]
-    depends_on: [redis, postgres, redpanda]
-
-  postgres:
-    image: postgres:16-alpine
-    environment: { POSTGRES_USER: buzzit, POSTGRES_PASSWORD: buzzit, POSTGRES_DB: buzzit }
-    ports: ["5432:5432"]
-    volumes: [pg:/var/lib/postgresql/data]
-
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-
-  redpanda:
-    image: redpandadata/redpanda:v24.2.7
-    command: [redpanda, start, --mode, dev-container, --smp, "1", --kafka-addr, "PLAINTEXT://0.0.0.0:9092", --advertise-kafka-addr, "PLAINTEXT://redpanda:9092"]
-    ports: ["9092:9092"]
-
-  scylla:
-    image: scylladb/scylla:6.1
-    command: [--smp, "1", --memory, "750M", --developer-mode, "1"]
-    ports: ["9042:9042"]
-
-  minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
-    command: server /data --console-address :9001
-    environment: { MINIO_ROOT_USER: buzzit, MINIO_ROOT_PASSWORD: buzzit-dev-only }
-    ports: ["9000:9000", "9001:9001"]
+      BUZZIT_MAX_UPLOAD_MB: "50"
+      # Optional push wake-ups through Firebase. Mount the key and uncomment:
+      # BUZZIT_FCM_SERVICE_ACCOUNT: /secrets/fcm.json
+    ports: ["8080:8080"]
+    volumes:
+      - buzzit-data:/data
+      # - ./secrets/fcm.json:/secrets/fcm.json:ro
 
 volumes:
-  pg: {}
+  buzzit-data: {}

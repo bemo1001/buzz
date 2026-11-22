@@ -8,3 +8,4 @@ build/
 local.properties
 *.apk
 .idea/
+.kotlin/
